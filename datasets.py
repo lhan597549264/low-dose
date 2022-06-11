@@ -41,7 +41,4 @@ class testDataset(Dataset):
         return {"name":self.testlist[index],"pic":item}
     def __len__(self):
         return len(self.testlist)
-transforms_ = [ transforms.Resize(512),  
-                transforms.ToTensor(),
-                transforms.Normalize((0.5), (0.5)) ]
 
