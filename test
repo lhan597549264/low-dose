@@ -3,17 +3,24 @@
 import argparse
 import sys
 import os
-from tkinter import image_names
 
+from skimage.metrics import structural_similarity as ssim
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
+from PIL import Image
+import numpy as np
 import torch
-
+import datetime
 from models import Generator
 from datasets import ImageDataset,testDataset
 os.chdir("/root/cyclegan")
+if os.path.exists("./output") is False:
+    os.makedirs("./output")
+log_path = "./output/{}".format(datetime.datetime.now().strftime("%Y_%m%d-%H_%M_%S"))
+if not os.path.exists(log_path):
+    os.mkdir(log_path)
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='./lung', help='root directory of the dataset')
@@ -64,12 +71,8 @@ dataloader = DataLoader(testDataset(opt.dataroot, transforms_=transforms_,),
 
 ###### Testing######
 
-# Create output dirs if they don't exist
-if not os.path.exists('./output/A'):
-    os.makedirs('./output/A')
-if not os.path.exists('./output/B'):
-    os.makedirs('./output/B')
 
+out=0
 for i, batch in enumerate(dataloader):
     # Set model input
     real_A = Variable(input_A.copy_(batch['pic']))
@@ -81,11 +84,17 @@ for i, batch in enumerate(dataloader):
     
 
     # Save image files
-    image_name="./output/B/"+batch["name"][0]
+    image_name=log_path+"/"+batch["name"][0]
     save_image(fake_B, image_name)
+
+
+    before_pic_name=os.path.join(opt.dataroot,"test","A",batch["name"][0])
+    before=np.array(Image.open(before_pic_name))
+    after=np.array(Image.open(image_name)).transpose(2,0,1)[0]
+    out+=ssim(before, after, multichannel=True)
     
-
+    
     sys.stdout.write('\rGenerated images %04d of %04d' % (i+1, len(dataloader)))
-
+print(out/len(dataloader))
 sys.stdout.write('\n')
 ###################################
