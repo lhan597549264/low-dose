@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
 parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs of training')
 parser.add_argument('--batchSize', type=int, default=2, help='size of the batches')
-parser.add_argument('--dataroot', type=str, default='./lung', help='root directory of the dataset')
+parser.add_argument('--dataroot', type=str, default='./lung1', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
 parser.add_argument('--decay_epoch', type=int, default=50, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=512, help='size of the data crop (squared assumed)')
@@ -35,18 +35,29 @@ parser.add_argument('--input_nc', type=int, default=1, help='number of channels 
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--cuda', type=bool, default=True, help='use GPU computation')
 parser.add_argument('--n_cpu', type=int, default=84, help='number of cpu threads to use during batch generation')
+parser.add_argument('--checkpoint', type=str, default="./runs/2022_0612-00_16_41", help='please input log_date of your checkpoint folder')
 opt = parser.parse_args()
 print(opt)
+check_path=opt.checkpoint+"/checkpoint.pth"
+
+
 
 print('Start Tensorboard with "tensorboard --logdir=runs", view at http://localhost:6006/')
 if os.path.exists("./runs") is False:
     os.makedirs("./runs")
 log_path = "./runs/{}".format(datetime.datetime.now().strftime("%Y_%m%d-%H_%M_%S"))
+if not opt.checkpoint=="":
+    log_path=opt.checkpoint
 if not os.path.exists(log_path):
     os.mkdir(log_path)
-with open(log_path + "/arg_list_epoch[{}].json".format(0), "w") as f:
-    f.write(json.dumps(vars(opt)))
+if not opt.checkpoint=="":
+    pass
+else :
+    with open(log_path + "/arg_list_epoch[{}].json".format(0), "w") as f:
+        f.write(json.dumps(vars(opt)))
+
 tb_writer = SummaryWriter(log_dir=log_path)
+
 
 if torch.cuda.is_available() and not opt.cuda:
     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
@@ -63,11 +74,18 @@ if opt.cuda:
     netG_B2A.cuda()
     netD_A.cuda()
     netD_B.cuda()
+if not opt.checkpoint=="":
+    para=torch.load(check_path)
+    netG_A2B.load_state_dict(para["netG_A2B"])
+    netG_B2A.load_state_dict(para["netG_B2A"])
+    netD_A.load_state_dict(para["netD_A"])
+    netD_B.load_state_dict(para["netD_B"])
+else :
+    netG_A2B.apply(weights_init_normal)
+    netG_B2A.apply(weights_init_normal)
+    netD_A.apply(weights_init_normal)
+    netD_B.apply(weights_init_normal)
 
-netG_A2B.apply(weights_init_normal)
-netG_B2A.apply(weights_init_normal)
-netD_A.apply(weights_init_normal)
-netD_B.apply(weights_init_normal)
 
 # Lossess
 criterion_GAN = torch.nn.MSELoss()
@@ -84,13 +102,24 @@ lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=Lambda
 lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(optimizer_D_A, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
 lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(optimizer_D_B, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
 
+if not opt.checkpoint=="":
+    para=torch.load(check_path)
+    optimizer_G.load_state_dict(para['optimizer_G'])
+    optimizer_D_A.load_state_dict(para['optimizer_D_A'])
+    optimizer_D_B.load_state_dict(para['optimizer_D_B'])
+    lr_scheduler_G.load_state_dict(para['lr_scheduler_G'])
+    lr_scheduler_D_A.load_state_dict(para['lr_scheduler_D_A'])
+    lr_scheduler_D_B.load_state_dict(para['lr_scheduler_D_B'])
+
+
+
 # Inputs & targets memory allocation
 Tensor = torch.cuda.FloatTensor if opt.cuda else torch.Tensor
 input_A = Tensor(opt.batchSize, opt.input_nc, opt.size, opt.size)
 input_B = Tensor(opt.batchSize, opt.output_nc, opt.size, opt.size)
 target_real = Variable(Tensor(opt.batchSize).fill_(1.0).unsqueeze(-1), requires_grad=False)
 target_fake = Variable(Tensor(opt.batchSize).fill_(0.0).unsqueeze(-1), requires_grad=False)
-print(target_fake.shape)
+
 fake_A_buffer = ReplayBuffer()
 fake_B_buffer = ReplayBuffer()
 
@@ -104,12 +133,19 @@ dataloader = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unal
                         batch_size=opt.batchSize, shuffle=True, num_workers=opt.n_cpu)
 
 # Loss plot
-logger = Logger(opt.n_epochs, len(dataloader),log_path)
+
 ###################################
 
 ###### Training ######
-for epoch in range(opt.epoch, opt.n_epochs):
-    for  batch in tqdm (dataloader):
+if not opt.checkpoint=="":
+    start_epoch=para["epoch"]+1
+else :
+    start_epoch=opt.epoch
+logger = Logger(opt.n_epochs, len(dataloader),log_path,start_epoch)
+
+for epoch in range(start_epoch, opt.n_epochs):
+    print(epoch)
+    for  batch in dataloader:
         # Set model input
         
         real_A = Variable(input_A.copy_(batch['A']))
@@ -201,15 +237,30 @@ for epoch in range(opt.epoch, opt.n_epochs):
         #             'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB).item(), 'loss_D': (loss_D_A + loss_D_B).item()}, 
         #             images={'real_A': real_A, 'real_B': real_B, 'fake_A': fake_A, 'fake_B': fake_B})
 
+
     # Update learning rates
     lr_scheduler_G.step()
     lr_scheduler_D_A.step()
     lr_scheduler_D_B.step()
-
+    
     # Save models checkpoints
     torch.save(netG_A2B.state_dict(), log_path+'/netG_A2B.pth')
     torch.save(netG_B2A.state_dict(), log_path+'/netG_B2A.pth')
     torch.save(netD_A.state_dict(), log_path+'/netD_A.pth')
     torch.save(netD_B.state_dict(), log_path+'/netD_B.pth')
+
+    checkpoint={'epoch': epoch,
+                'netG_A2B': netG_A2B.state_dict(),
+                'netG_B2A': netG_B2A.state_dict(),
+                'netD_A': netD_A.state_dict(),
+                'netD_B': netD_B.state_dict(),
+                'lr_scheduler_G':lr_scheduler_G.state_dict(),
+                'lr_scheduler_D_A':lr_scheduler_D_A.state_dict(),
+                'lr_scheduler_D_B':lr_scheduler_D_B.state_dict(),
+                'optimizer_G':optimizer_G.state_dict(),
+                'optimizer_D_A':optimizer_D_A.state_dict(),
+                'optimizer_D_B':optimizer_D_B.state_dict(),
+                }
+    torch.save(checkpoint,log_path+'/checkpoint.pth')
 ###################################
 Logger.file.close()

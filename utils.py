@@ -15,11 +15,11 @@ def tensor2image(tensor):
     return image.astype(np.uint8)
 
 class Logger():
-    def __init__(self, n_epochs, batches_epoch,log_path):
+    def __init__(self, n_epochs, batches_epoch,log_path,epoch):
         # self.viz = Visdom()
         self.n_epochs = n_epochs
         self.batches_epoch = batches_epoch
-        self.epoch = 1
+        self.epoch = epoch
         self.batch = 1
         self.prev_time = time.time()
         self.mean_period = 0
@@ -27,7 +27,7 @@ class Logger():
         self.loss_windows = {}
         self.image_windows = {}
         self.log_path=log_path
-        self.file=open(log_path+'/log','w')
+        self.file=open(log_path+'/log','a')
     def log(self, losses=None):
         self.mean_period += (time.time() - self.prev_time)
         self.prev_time = time.time()
@@ -45,7 +45,7 @@ class Logger():
             else:
                 self.file.write('%s: %.4f | ' % (loss_name, self.losses[loss_name]/self.batch))
 
-        batches_done = self.batches_epoch*(self.epoch - 1) + self.batch
+        batches_done = self.batches_epoch*(self.epoch - 0) + self.batch
         batches_left = self.batches_epoch*(self.n_epochs - self.epoch) + self.batches_epoch - self.batch 
         self.file.write('ETA: %s' % (datetime.timedelta(seconds=batches_left*self.mean_period/batches_done)))
 
@@ -115,4 +115,5 @@ def weights_init_normal(m):
     elif classname.find('BatchNorm2d') != -1:
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant(m.bias.data, 0.0)
+
 
