@@ -2,6 +2,7 @@
 
 import argparse
 import itertools
+from sched import scheduler
 from tqdm import tqdm
 from torchvision.transforms import InterpolationMode
 import torchvision.transforms as transforms
@@ -28,14 +29,15 @@ parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
 parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs of training')
 parser.add_argument('--batchSize', type=int, default=2, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='./lung1', help='root directory of the dataset')
-parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
+parser.add_argument('--lr', type=float, default=0.001, help='initial learning rate')
 parser.add_argument('--decay_epoch', type=int, default=50, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=512, help='size of the data crop (squared assumed)')
 parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--cuda', type=bool, default=True, help='use GPU computation')
 parser.add_argument('--n_cpu', type=int, default=84, help='number of cpu threads to use during batch generation')
-parser.add_argument('--checkpoint', type=str, default="./runs/2022_0612-00_16_41", help='please input log_date of your checkpoint folder')
+parser.add_argument('--checkpoint', type=str, default="", help='please input log_date of your checkpoint folder')
+parser.add_argument('--scheduler', type=str, default="reduce")
 opt = parser.parse_args()
 print(opt)
 check_path=opt.checkpoint+"/checkpoint.pth"
@@ -98,9 +100,20 @@ optimizer_G = torch.optim.Adam(itertools.chain(netG_A2B.parameters(), netG_B2A.p
 optimizer_D_A = torch.optim.Adam(netD_A.parameters(), lr=opt.lr, betas=(0.5, 0.999))
 optimizer_D_B = torch.optim.Adam(netD_B.parameters(), lr=opt.lr, betas=(0.5, 0.999))
 
-lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
-lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(optimizer_D_A, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
-lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(optimizer_D_B, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
+
+if opt.scheduler=="adam":
+    lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
+    lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(optimizer_D_A, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
+    lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(optimizer_D_B, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
+elif opt.scheduler=="reduce":
+    lr_scheduler_G=torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_G,mode='min',factor=0.1,patience=10,
+verbose=False,threshold=0.0001,threshold_mode='rel',cooldown=0,min_lr=0,eps=1e-08)
+    lr_scheduler_D_A=torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_D_A,mode='min',factor=0.1,patience=10,
+verbose=False,threshold=0.0001,threshold_mode='rel',cooldown=0,min_lr=0,eps=1e-08)
+    lr_scheduler_D_B=torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_D_B,mode='min',factor=0.1,patience=10,
+verbose=False,threshold=0.0001,threshold_mode='rel',cooldown=0,min_lr=0,eps=1e-08)
+
+# elif opt.scheduler=="reduce":
 
 if not opt.checkpoint=="":
     para=torch.load(check_path)
@@ -145,7 +158,7 @@ logger = Logger(opt.n_epochs, len(dataloader),log_path,start_epoch)
 
 for epoch in range(start_epoch, opt.n_epochs):
     print(epoch)
-    for  batch in dataloader:
+    for  batch in tqdm(dataloader):
         # Set model input
         
         real_A = Variable(input_A.copy_(batch['A']))
@@ -239,9 +252,9 @@ for epoch in range(start_epoch, opt.n_epochs):
 
 
     # Update learning rates
-    lr_scheduler_G.step()
-    lr_scheduler_D_A.step()
-    lr_scheduler_D_B.step()
+    lr_scheduler_G.step(metrics= loss_G)
+    lr_scheduler_D_A.step(metrics=loss_D_A)
+    lr_scheduler_D_B.step(metrics=loss_D_B)
     
     # Save models checkpoints
     torch.save(netG_A2B.state_dict(), log_path+'/netG_A2B.pth')
